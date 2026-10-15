@@ -1,0 +1,24 @@
+# Not part of the kustomization.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kiosk-home
+  labels:
+    app.kubernetes.io/name: kiosk-home
+spec:
+  # ingressClassName: nginx
+  tls:
+    - hosts:
+        - home.example.org
+      secretName: home-example-org-tls
+  rules:
+    - host: home.example.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kiosk-home
+                port:
+                  number: 8080

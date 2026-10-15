@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kiosk-home
+  labels:
+    app.kubernetes.io/name: kiosk-home
+data:
+  # IP address of the Hue bridge.
+  KIOSK_HUE_HOST: "192.0.2.196"
+  # debug, info, warning or error.
+  KIOSK_LOG_LEVEL: "info"
+---
+# Mounted at /config. Edits apply without a restart once the kubelet syncs
+# the volume (up to about a minute).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kiosk-home-links
+  labels:
+    app.kubernetes.io/name: kiosk-home
+data:
+  links.json: |
+    [
+      {"title": "Music", "url": "https://music.example.org", "icon": "🎵"},
+      {"title": "Cameras", "url": "https://cam.example.org", "icon": "📷"},
+      {"title": "Router", "url": "http://192.0.2.1"}
+    ]
