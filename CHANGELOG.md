@@ -8,6 +8,25 @@ All notable changes to this project are listed here. The format follows
 Each release is published as a container image:
 `ghcr.io/m8-t/kiosk-home:<version>`.
 
+## [0.2.0] - 2026-10-15
+
+### Added
+
+- Application dashboard as start page: large app tiles for every link plus a built-in
+  Lights tile with a live summary of the rooms that are on.
+- Apps open inside the page in a full-size iframe below a top bar with a Home button.
+  Opened apps stay loaded, so returning to them is instant.
+- Optional `open` field in `links.json`: `"frame"` (default) or `"tab"`. Other values are
+  rejected.
+- Hash routes (`#/`, `#/lights`, `#/app/<index>`) so the Android back button returns to
+  the dashboard.
+
+### Changed
+
+- Room cards moved to their own Lights view with the same top bar.
+- Room polling runs only while the page is visible and the dashboard or Lights view is
+  shown.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added

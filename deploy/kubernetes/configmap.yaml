@@ -23,5 +23,5 @@ data:
     [
       {"title": "Music", "url": "https://music.example.org", "icon": "🎵"},
       {"title": "Cameras", "url": "https://cam.example.org", "icon": "📷"},
-      {"title": "Router", "url": "http://192.0.2.1"}
+      {"title": "Router", "url": "http://192.0.2.1", "open": "tab"}
     ]

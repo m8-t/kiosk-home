@@ -7,4 +7,4 @@ resources:
   - service.yaml
 images:
   - name: ghcr.io/m8-t/kiosk-home
-    newTag: 0.1.0
+    newTag: 0.2.0

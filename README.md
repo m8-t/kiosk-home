@@ -3,10 +3,16 @@
 A small start page for a wall tablet (Android, Chromium WebView, 10 inch landscape, touch
 only, portrait works too). It shows:
 
-1. Link tiles (title, URL, optional emoji or letter icon) from a JSON file. Tapping a tile
-   opens the URL in the same tab.
-2. One card per Philips Hue room with an on/off toggle and a brightness slider (1 to 100
-   percent). Rooms only: no single lights, colors or scenes.
+1. A home dashboard: a grid of large app tiles, one per entry of the links file plus a
+   built-in Lights tile that shows a live summary ("2 of 3 on" or "All off").
+2. A Lights view: one card per Philips Hue room with an on/off toggle and a brightness
+   slider (1 to 100 percent). Rooms only: no single lights, colors or scenes.
+3. An app view: a link opens inside the page in a full-size iframe below a thin top bar
+   with a Home button. Opened apps stay loaded (hidden) so returning to them is instant.
+
+Views use hash routes (`#/`, `#/lights`, `#/app/<index>`), so the Android back button
+walks back to the dashboard. `/api/rooms` is polled every 5 seconds only while the page is
+visible and the dashboard or Lights view is shown.
 
 The server is a single aiohttp process that serves the page and talks to the Hue bridge
 over the local CLIP v2 API. The app key never reaches the browser.
@@ -28,13 +34,16 @@ bridge uses a self-signed certificate.
 ### Links file
 
 A JSON array. `icon` is optional; without it the first letter of the title is used. URLs
-must be http or https. The file is read on every request, so a changed ConfigMap applies
+must be http or https. `open` is optional: `"frame"` (default) opens the app inside the
+page, `"tab"` navigates to the URL like a plain link. Any other value is an error. Sites
+that send `X-Frame-Options` or a restrictive `Content-Security-Policy: frame-ancestors`
+cannot be framed; use `"open": "tab"` for those. The file is read on every request, so a changed ConfigMap applies
 without a restart. A missing file means no tiles.
 
 ```json
 [
   {"title": "Music", "url": "https://music.example.org", "icon": "M"},
-  {"title": "Router", "url": "http://192.0.2.1"}
+  {"title": "Router", "url": "http://192.0.2.1", "open": "tab"}
 ]
 ```
 
