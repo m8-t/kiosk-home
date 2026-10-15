@@ -21,6 +21,7 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 
 SETTINGS = web.AppKey("settings", Settings)
 HUE = web.AppKey("hue", HueClient)
+KNOWN_IDS = web.AppKey("known_ids", set)
 
 
 class LinksError(Exception):
@@ -98,9 +99,13 @@ async def handle_links(request: web.Request) -> web.Response:
 
 async def handle_rooms(request: web.Request) -> web.Response:
     try:
-        return web.json_response(await request.app[HUE].rooms())
+        rooms = await request.app[HUE].rooms()
     except HueError as exc:
         return _json_error(502, str(exc))
+    known = request.app[KNOWN_IDS]
+    known.clear()
+    known.update(r["id"] for r in rooms)
+    return web.json_response(rooms)
 
 
 async def handle_room_update(request: web.Request) -> web.Response:
@@ -113,27 +118,24 @@ async def handle_room_update(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _json_error(400, str(exc))
     hue = request.app[HUE]
+    known = request.app[KNOWN_IDS]
+    room_id = request.match_info["id"]
     try:
-        rooms = await hue.rooms()
-        room = next((r for r in rooms if r["id"] == request.match_info["id"]), None)
-        if room is None:
-            return _json_error(404, "unknown room")
+        if room_id not in known:
+            known.clear()
+            known.update(r["id"] for r in await hue.rooms())
+            if room_id not in known:
+                return _json_error(404, "unknown room")
         body: dict[str, Any] = {}
         if on is not None:
             body["on"] = {"on": on}
         if brightness is not None:
             body["dimming"] = {"brightness": brightness}
-            if not room["on"]:
-                body["on"] = {"on": True}
-        await hue.set_group(room["id"], body)
+            body["on"] = {"on": True}
+        await hue.set_group(room_id, body)
     except HueError as exc:
         return _json_error(502, str(exc))
-    updated = dict(room)
-    if "on" in body:
-        updated["on"] = body["on"]["on"]
-    if brightness is not None:
-        updated["brightness"] = brightness
-    return web.json_response(updated)
+    return web.json_response({"id": room_id, "on": body["on"]["on"], "brightness": brightness})
 
 
 async def handle_healthz(request: web.Request) -> web.Response:
@@ -147,6 +149,7 @@ async def handle_index(request: web.Request) -> web.FileResponse:
 def create_app(settings: Settings) -> web.Application:
     app = web.Application()
     app[SETTINGS] = settings
+    app[KNOWN_IDS] = set()
 
     async def hue_session(app: web.Application) -> Any:
         async with aiohttp.ClientSession() as session:

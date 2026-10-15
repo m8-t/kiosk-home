@@ -37,6 +37,9 @@ class HueClient:
             log.warning("hue %s %s failed: %s", method, path, type(exc).__name__)
             raise HueError("Hue bridge unreachable") from exc
         errors = payload.get("errors") if isinstance(payload, dict) else None
+        if status == 429:
+            log.warning("hue %s %s -> 429", method, path)
+            raise HueError("Hue bridge busy, try again")
         if not 200 <= status < 300 or errors:
             detail = ""
             if isinstance(errors, list) and errors and isinstance(errors[0], dict):

@@ -109,16 +109,49 @@ async def test_toggle(tmp_path: Path) -> None:
     async with rig(tmp_path) as env:
         resp = await env.client.post("/api/rooms/gl-k", json={"on": False})
         assert resp.status == 200
-        assert (await resp.json())["on"] is False
+        assert await resp.json() == {"id": "gl-k", "on": False, "brightness": None}
         assert env.hue.puts == [("gl-k", {"on": {"on": False}})]
 
 
-async def test_dim_on_lit_room(tmp_path: Path) -> None:
+async def test_dim_always_sends_on_true(tmp_path: Path) -> None:
     async with rig(tmp_path) as env:
         resp = await env.client.post("/api/rooms/gl-k", json={"brightness": 42})
         assert resp.status == 200
-        assert env.hue.puts == [("gl-k", {"dimming": {"brightness": 42.0}})]
-        assert (await resp.json())["brightness"] == 42.0
+        assert env.hue.puts == [("gl-k", {"dimming": {"brightness": 42.0}, "on": {"on": True}})]
+        assert await resp.json() == {"id": "gl-k", "on": True, "brightness": 42.0}
+
+
+async def test_post_with_cached_id_makes_only_the_put(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        await env.client.get("/api/rooms")
+        env.hue.keys.clear()
+        resp = await env.client.post("/api/rooms/gl-k", json={"brightness": 30})
+        assert resp.status == 200
+        assert len(env.hue.keys) == 1
+        assert len(env.hue.puts) == 1
+
+
+async def test_unknown_id_refreshes_once_then_404(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        resp = await env.client.post("/api/rooms/nope", json={"on": True})
+        assert resp.status == 404
+        assert len(env.hue.keys) == 1
+        assert env.hue.puts == []
+
+
+async def test_unknown_id_found_after_refresh(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        resp = await env.client.post("/api/rooms/gl-b", json={"on": True})
+        assert resp.status == 200
+        assert len(env.hue.puts) == 1
+
+
+async def test_hue_429_busy_message(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        env.hue.put_status = 429
+        resp = await env.client.post("/api/rooms/gl-k", json={"on": False})
+        assert resp.status == 502
+        assert (await resp.json())["error"] == "Hue bridge busy, try again"
 
 
 async def test_dim_off_room_adds_on(tmp_path: Path) -> None:
@@ -126,8 +159,7 @@ async def test_dim_off_room_adds_on(tmp_path: Path) -> None:
         resp = await env.client.post("/api/rooms/gl-b", json={"brightness": 10})
         assert resp.status == 200
         assert env.hue.puts == [("gl-b", {"dimming": {"brightness": 10.0}, "on": {"on": True}})]
-        body = await resp.json()
-        assert body["on"] is True and body["brightness"] == 10.0
+        assert await resp.json() == {"id": "gl-b", "on": True, "brightness": 10.0}
 
 
 async def test_unknown_room_404(tmp_path: Path) -> None:

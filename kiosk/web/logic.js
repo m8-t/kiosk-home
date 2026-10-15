@@ -1,6 +1,6 @@
 export const POLL_MS = 5000;
 export const HOLD_MS = 2000;
-export const SLIDER_INTERVAL_MS = 250;
+export const SLIDER_INTERVAL_MS = 1000;
 
 export function clampBrightness(value) {
   const n = Math.round(Number(value));
