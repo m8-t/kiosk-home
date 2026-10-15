@@ -13,10 +13,14 @@
   <button id="home-btn" type="button" class="home-btn" aria-label="Home"><span class="ic" id="home-ic"></span><span>Home</span></button>
   <h1 id="bar-title" class="bar-title"></h1>
 </header>
-<main id="view-home" class="page" aria-label="Apps">
+<main id="view-home" class="page home-page" aria-label="Apps">
   <ul id="tiles" class="tiles"></ul>
 </main>
 <main id="view-lights" class="page" aria-label="Lights" hidden>
+  <div id="all-row" class="all-row" hidden>
+    <div class="all-text"><div class="all-name">All lights</div><div id="all-value" class="room-value"></div></div>
+    <button id="all-power" type="button" class="power power-lg" aria-label="Toggle all lights"></button>
+  </div>
   <p id="rooms-empty" class="sub" hidden>No rooms found</p>
   <ul id="rooms" class="rooms"></ul>
 </main>

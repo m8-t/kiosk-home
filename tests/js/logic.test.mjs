@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   clampBrightness, displayBrightness, iconFor, mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
+  PALETTE, isHexColor, accentFor, lightsAccent, LIGHTS_ON_COLOR, LIGHTS_OFF_COLOR, mergeAll, setAllRooms,
 } from "../../kiosk/web/logic.js";
 
 test("clampBrightness", () => {
@@ -132,4 +133,39 @@ test("shouldPoll", () => {
   assert.equal(shouldPoll("app", false), false);
   assert.equal(shouldPoll("home", true), false);
   assert.equal(shouldPoll("lights", true), false);
+});
+
+test("isHexColor", () => {
+  for (const ok of ["#fff", "#A855F7", "#0af"]) assert.equal(isHexColor(ok), true);
+  for (const bad of ["fff", "#ff", "#ffff", "red", "#12345g", "#fff;x", "", null, 5]) {
+    assert.equal(isHexColor(bad), false);
+  }
+});
+
+test("accentFor uses own color or palette by index", () => {
+  assert.equal(accentFor({ color: "#123456" }, 0), "#123456");
+  assert.equal(accentFor({}, 0), PALETTE[0]);
+  assert.equal(accentFor({ color: "bogus" }, 1), PALETTE[1]);
+  assert.equal(accentFor({}, PALETTE.length + 2), PALETTE[2]);
+});
+
+test("lightsAccent", () => {
+  assert.equal(lightsAccent(null), LIGHTS_OFF_COLOR);
+  assert.equal(lightsAccent([{ on: false }]), LIGHTS_OFF_COLOR);
+  assert.equal(lightsAccent([{ on: false }, { on: true }]), LIGHTS_ON_COLOR);
+});
+
+test("mergeAll holds local state inside the window", () => {
+  const polled = { id: "a", on: true };
+  assert.equal(mergeAll(null, null, undefined, 10000), null);
+  assert.deepEqual(mergeAll({ id: "a", on: false }, polled, 9000, 10000, 2000), { id: "a", on: false });
+  assert.deepEqual(mergeAll({ id: "a", on: false }, polled, 7000, 10000, 2000), polled);
+  assert.deepEqual(mergeAll(null, polled, 9000, 10000, 2000), polled);
+});
+
+test("setAllRooms sets on and keeps the rest", () => {
+  const rooms = [{ id: "a", on: true, brightness: 30 }, { id: "b", on: false, brightness: null }];
+  assert.deepEqual(setAllRooms(rooms, false).map((r) => r.on), [false, false]);
+  assert.deepEqual(setAllRooms(rooms, true)[0], { id: "a", on: true, brightness: 30 });
+  assert.equal(rooms[0].on, true);
 });

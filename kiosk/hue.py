@@ -20,6 +20,26 @@ class HueClient:
         self._base = base_url.rstrip("/")
         self._headers = {"hue-application-key": app_key}
         self._session = session
+        self._all_id: str | None = None
+        self._all_known = False
+
+    async def all_group_id(self) -> str | None:
+        """Grouped light id of the bridge_home resource (all lights), cached once found."""
+        if self._all_known:
+            return self._all_id
+        data = await self._request("GET", "bridge_home")
+        found = None
+        for home in data:
+            if not isinstance(home, dict):
+                continue
+            for svc in home.get("services", []):
+                if isinstance(svc, dict) and svc.get("rtype") == "grouped_light":
+                    found = svc.get("rid")
+                    break
+            if found:
+                break
+        self._all_id, self._all_known = found, True
+        return found
 
     async def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> list[Any]:
         url = f"{self._base}/clip/v2/resource/{path}"
@@ -51,10 +71,20 @@ class HueClient:
             raise HueError("Hue bridge sent an unexpected response")
         return data
 
+    async def _safe_all_id(self) -> str | None:
+        try:
+            return await self.all_group_id()
+        except HueError:
+            return None
+
     async def rooms(self) -> list[dict[str, Any]]:
         """Return rooms as {id (grouped_light id), name, on, brightness}, sorted by name."""
-        rooms, lights = await asyncio.gather(
-            self._request("GET", "room"), self._request("GET", "grouped_light")
+        return (await self.overview())["rooms"]
+
+    async def overview(self) -> dict[str, Any]:
+        """Return {"all": {id, on} | None, "rooms": [...]} from one set of bridge reads."""
+        rooms, lights, all_id = await asyncio.gather(
+            self._request("GET", "room"), self._request("GET", "grouped_light"), self._safe_all_id()
         )
         by_id = {item.get("id"): item for item in lights if isinstance(item, dict)}
         result: list[dict[str, Any]] = []
@@ -82,7 +112,13 @@ class HueClient:
                 }
             )
         result.sort(key=lambda r: (r["name"].casefold(), r["id"]))
-        return result
+        all_light = by_id.get(all_id) if all_id else None
+        all_state = (
+            {"id": all_id, "on": bool((all_light.get("on") or {}).get("on", False))}
+            if all_light is not None
+            else None
+        )
+        return {"all": all_state, "rooms": result}
 
     async def set_group(self, group_id: str, body: dict[str, Any]) -> None:
         await self._request("PUT", f"grouped_light/{group_id}", body)

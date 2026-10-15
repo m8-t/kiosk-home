@@ -106,3 +106,33 @@ export function lightsSummary(rooms) {
 export function shouldPoll(view, hidden) {
   return !hidden && (view === "home" || view === "lights");
 }
+
+export const PALETTE = ["#a78bfa", "#2dd4bf", "#f472b6", "#4ade80", "#fb923c"];
+export const LIGHTS_ON_COLOR = "#fbbf24";
+export const LIGHTS_OFF_COLOR = "#7b8494";
+
+export function isHexColor(value) {
+  return typeof value === "string" && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
+}
+
+// Accent for a links.json tile: its own valid color, else a palette entry by index.
+export function accentFor(link, index) {
+  if (link && isHexColor(link.color)) return link.color;
+  return PALETTE[((index % PALETTE.length) + PALETTE.length) % PALETTE.length];
+}
+
+export function lightsAccent(rooms) {
+  return rooms && rooms.some((r) => r.on) ? LIGHTS_ON_COLOR : LIGHTS_OFF_COLOR;
+}
+
+// Same hold rule as mergeRooms, for the all-lights switch state ({id, on} or null).
+export function mergeAll(local, polled, touchedAt, now, holdMs = HOLD_MS) {
+  if (!polled) return null;
+  if (local && touchedAt !== undefined && now - touchedAt < holdMs) return { ...polled, on: local.on };
+  return polled;
+}
+
+// Rooms with every room set on or off; brightness is left as is.
+export function setAllRooms(rooms, on) {
+  return rooms.map((r) => ({ ...r, on }));
+}

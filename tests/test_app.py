@@ -35,7 +35,16 @@ class FakeHue:
         self.lights: dict[str, dict[str, Any]] = {
             "gl-k": {"id": "gl-k", "on": {"on": True}, "dimming": {"brightness": 54.3}},
             "gl-b": {"id": "gl-b", "on": {"on": False}},
+            "gl-all": {"id": "gl-all", "on": {"on": True}, "dimming": {"brightness": 40.0}},
         }
+        self.bridge_home: list[dict[str, Any]] = [
+            {
+                "id": "bh-1",
+                "type": "bridge_home",
+                "services": [{"rtype": "grouped_light", "rid": "gl-all"}],
+            }
+        ]
+        self.bridge_home_gets = 0
         self.puts: list[tuple[str, dict[str, Any]]] = []
         self.keys: list[str | None] = []
         self.put_status = 200
@@ -43,12 +52,17 @@ class FakeHue:
         self.get_status = 200
         self.app = web.Application()
         self.app.router.add_get("/clip/v2/resource/room", self.get_rooms)
+        self.app.router.add_get("/clip/v2/resource/bridge_home", self.get_bridge_home)
         self.app.router.add_get("/clip/v2/resource/grouped_light", self.get_lights)
         self.app.router.add_put("/clip/v2/resource/grouped_light/{id}", self.put_light)
 
     async def get_rooms(self, request: web.Request) -> web.Response:
         self.keys.append(request.headers.get("hue-application-key"))
         return web.json_response({"errors": [], "data": self.rooms}, status=self.get_status)
+
+    async def get_bridge_home(self, request: web.Request) -> web.Response:
+        self.bridge_home_gets += 1
+        return web.json_response({"errors": [], "data": self.bridge_home}, status=self.get_status)
 
     async def get_lights(self, request: web.Request) -> web.Response:
         return web.json_response(
@@ -83,10 +97,13 @@ async def test_rooms_join_and_sort(tmp_path: Path) -> None:
     async with rig(tmp_path) as env:
         resp = await env.client.get("/api/rooms")
         assert resp.status == 200
-        assert await resp.json() == [
-            {"id": "gl-b", "name": "bedroom", "on": False, "brightness": None},
-            {"id": "gl-k", "name": "Kitchen", "on": True, "brightness": 54.3},
-        ]
+        assert await resp.json() == {
+            "all": {"id": "gl-all", "on": True},
+            "rooms": [
+                {"id": "gl-b", "name": "bedroom", "on": False, "brightness": None},
+                {"id": "gl-k", "name": "Kitchen", "on": True, "brightness": 54.3},
+            ],
+        }
         assert set(env.hue.keys) == {KEY}
 
 
@@ -246,6 +263,11 @@ async def test_links_missing_file_is_empty(tmp_path: Path) -> None:
         '[{"title": "x", "url": "javascript:alert(1)"}]',
         '[{"url": "https://a.example"}]',
         '["x"]',
+        '[{"title": "x", "url": "https://a.example", "color": "red"}]',
+        '[{"title": "x", "url": "https://a.example", "color": "#12"}]',
+        '[{"title": "x", "url": "https://a.example", "color": "#12345g"}]',
+        '[{"title": "x", "url": "https://a.example", "color": 5}]',
+        '[{"title": "x", "url": "https://a.example", "color": "#a855f7;x"}]',
         '[{"title": "x", "url": "https://a.example", "open": "window"}]',
         '[{"title": "x", "url": "https://a.example", "open": true}]',
         '[{"title": "x", "url": "https://a.example", "open": ""}]',
@@ -272,6 +294,55 @@ async def test_links_open_mode_passes_through(tmp_path: Path) -> None:
         )
         data = await (await env.client.get("/api/links")).json()
         assert [d.get("open") for d in data] == ["frame", "tab", None]
+
+
+async def test_links_color_passes_through(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        env.links.write_text(
+            json.dumps(
+                [
+                    {"title": "A", "url": "https://a.example", "color": "#a855f7"},
+                    {"title": "B", "url": "https://b.example", "color": "#0af"},
+                    {"title": "C", "url": "https://c.example"},
+                ]
+            )
+        )
+        data = await (await env.client.get("/api/links")).json()
+        assert [d.get("color") for d in data] == ["#a855f7", "#0af", None]
+
+
+@pytest.mark.parametrize("on", [True, False])
+async def test_all_switch_single_put(tmp_path: Path, on: bool) -> None:
+    async with rig(tmp_path) as env:
+        resp = await env.client.post("/api/all", json={"on": on})
+        assert resp.status == 200 and await resp.json() == {"on": on}
+        assert env.hue.puts == [("gl-all", {"on": {"on": on}})]
+        await env.client.post("/api/all", json={"on": on})
+        assert env.hue.bridge_home_gets == 1
+
+
+async def test_all_missing_bridge_home(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        env.hue.bridge_home = []
+        data = await (await env.client.get("/api/rooms")).json()
+        assert data["all"] is None and len(data["rooms"]) == 2
+        resp = await env.client.post("/api/all", json={"on": True})
+        assert resp.status == 404
+        assert env.hue.puts == []
+
+
+@pytest.mark.parametrize("payload", [{}, {"on": 1}, {"on": True, "brightness": 5}, [True]])
+async def test_all_bad_body_400(tmp_path: Path, payload: Any) -> None:
+    async with rig(tmp_path) as env:
+        resp = await env.client.post("/api/all", json=payload)
+        assert resp.status == 400
+        assert env.hue.puts == []
+
+
+async def test_all_put_failure_502(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        env.hue.put_status = 500
+        assert (await env.client.post("/api/all", json={"on": False})).status == 502
 
 
 def test_settings_defaults() -> None:

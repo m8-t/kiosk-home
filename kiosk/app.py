@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -25,6 +26,7 @@ KNOWN_IDS = web.AppKey("known_ids", set)
 
 
 OPEN_MODES = ("frame", "tab")
+COLOR_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})")
 
 
 class LinksError(Exception):
@@ -50,7 +52,7 @@ def read_links(path: Path) -> list[dict[str, str]]:
         if not isinstance(item, dict):
             raise LinksError(f"link {i} must be an object")
         title, url, icon = item.get("title"), item.get("url"), item.get("icon")
-        open_mode = item.get("open")
+        open_mode, color = item.get("open"), item.get("color")
         if not isinstance(title, str) or not title.strip():
             raise LinksError(f"link {i} needs a title")
         if not isinstance(url, str) or urlsplit(url).scheme not in ("http", "https"):
@@ -59,11 +61,15 @@ def read_links(path: Path) -> list[dict[str, str]]:
             raise LinksError(f"link {i} icon must be a string")
         if open_mode is not None and open_mode not in OPEN_MODES:
             raise LinksError(f'link {i} open must be "frame" or "tab"')
+        if color is not None and not (isinstance(color, str) and COLOR_RE.fullmatch(color)):
+            raise LinksError(f"link {i} color must be a hex color like #a855f7")
         entry = {"title": title.strip(), "url": url.strip()}
         if icon:
             entry["icon"] = icon
         if open_mode is not None:
             entry["open"] = open_mode
+        if color is not None:
+            entry["color"] = color
         links.append(entry)
     return links
 
@@ -107,13 +113,31 @@ async def handle_links(request: web.Request) -> web.Response:
 
 async def handle_rooms(request: web.Request) -> web.Response:
     try:
-        rooms = await request.app[HUE].rooms()
+        overview = await request.app[HUE].overview()
     except HueError as exc:
         return _json_error(502, str(exc))
     known = request.app[KNOWN_IDS]
     known.clear()
-    known.update(r["id"] for r in rooms)
-    return web.json_response(rooms)
+    known.update(r["id"] for r in overview["rooms"])
+    return web.json_response(overview)
+
+
+async def handle_all_update(request: web.Request) -> web.Response:
+    try:
+        payload = await request.json()
+    except ValueError:
+        return _json_error(400, "body must be JSON")
+    if not isinstance(payload, dict) or set(payload) != {"on"} or not isinstance(payload["on"], bool):
+        return _json_error(400, 'body must be {"on": true|false}')
+    hue = request.app[HUE]
+    try:
+        group_id = await hue.all_group_id()
+        if group_id is None:
+            return _json_error(404, "no all-lights group on the bridge")
+        await hue.set_group(group_id, {"on": {"on": payload["on"]}})
+    except HueError as exc:
+        return _json_error(502, str(exc))
+    return web.json_response({"on": payload["on"]})
 
 
 async def handle_room_update(request: web.Request) -> web.Response:
@@ -169,6 +193,7 @@ def create_app(settings: Settings) -> web.Application:
     app.router.add_get("/healthz", handle_healthz)
     app.router.add_get("/api/links", handle_links)
     app.router.add_get("/api/rooms", handle_rooms)
+    app.router.add_post("/api/all", handle_all_update)
     app.router.add_post("/api/rooms/{id}", handle_room_update)
     app.router.add_static("/assets/", WEB_DIR, append_version=False)
     return app

@@ -1,6 +1,7 @@
 import {
   POLL_MS, HOLD_MS, SLIDER_INTERVAL_MS, clampBrightness, displayBrightness, iconFor,
   mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
+  accentFor, lightsAccent, mergeAll, setAllRooms, LIGHTS_ON_COLOR,
 } from "./logic.js";
 
 const POWER_SVG =
@@ -13,7 +14,7 @@ const HOME_SVG =
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/>' +
   '<path d="M5 10v10h5v-6h4v6h5V10"/></svg>';
 const BULB_SVG =
-  '<svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+  '<svg viewBox="0 0 24 24" width="72" height="72" fill="none" stroke="currentColor" stroke-width="1.5" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/>' +
   '<path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>';
 
@@ -30,6 +31,9 @@ let polling = false;
 let links = [];
 let route = { view: "home" };
 let roomsLoaded = false;
+let allState = null;
+let lightsTile = null;
+const ALL_KEY = "__all";
 let lightsSummaryEl = null;
 const frames = new Map();
 
@@ -163,6 +167,42 @@ function render() {
     paint(room);
   });
   $("rooms-empty").hidden = rooms.length > 0;
+  paintAll();
+}
+
+function paintAll() {
+  $("all-row").hidden = !allState;
+  if (!allState) return;
+  $("all-power").setAttribute("aria-pressed", String(allState.on));
+  $("all-value").textContent = allState.on ? "On" : "Off";
+}
+
+async function toggleAll() {
+  if (!allState) return;
+  const target = !allState.on;
+  const snapshot = { all: allState, rooms };
+  allState = { ...allState, on: target };
+  rooms = setAllRooms(rooms, target);
+  const stamp = Date.now();
+  lastChange[ALL_KEY] = stamp;
+  for (const r of rooms) lastChange[r.id] = stamp;
+  render();
+  updateSummary();
+  try {
+    await api("/api/all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on: target }),
+    });
+  } catch (err) {
+    allState = snapshot.all;
+    rooms = snapshot.rooms;
+    delete lastChange[ALL_KEY];
+    for (const r of rooms) delete lastChange[r.id];
+    render();
+    updateSummary();
+    showError(err.message);
+  }
 }
 
 async function toggle(id) {
@@ -198,8 +238,10 @@ async function poll() {
   if (polling) return;
   polling = true;
   try {
-    const polled = await api("/api/rooms");
-    rooms = mergeRooms(rooms, polled, lastChange, Date.now(), HOLD_MS);
+    const data = await api("/api/rooms");
+    const now = Date.now();
+    rooms = mergeRooms(rooms, data.rooms, lastChange, now, HOLD_MS);
+    allState = mergeAll(allState, data.all, lastChange[ALL_KEY], now, HOLD_MS);
     roomsLoaded = true;
     render();
     updateSummary();
@@ -230,12 +272,14 @@ function svgIcon(svg, extra = "") {
 }
 
 function updateSummary() {
+  if (lightsTile) lightsTile.style.setProperty("--a", lightsAccent(roomsLoaded ? rooms : null));
   if (lightsSummaryEl) lightsSummaryEl.textContent = lightsSummary(roomsLoaded ? rooms : null);
 }
 
-function buildTile(tag, iconNode, titleText) {
+function buildTile(tag, iconNode, titleText, accent) {
   const el = document.createElement(tag);
   el.className = "tile";
+  el.style.setProperty("--a", accent);
   const icon = document.createElement("span");
   icon.className = "tile-icon";
   icon.append(iconNode);
@@ -246,29 +290,37 @@ function buildTile(tag, iconNode, titleText) {
   return el;
 }
 
+function textIcon(text) {
+  const span = document.createElement("span");
+  span.className = "tile-glyph";
+  span.textContent = text;
+  return span;
+}
+
 function renderTiles() {
   const ul = $("tiles");
   ul.replaceChildren();
 
-  const lights = buildTile("button", svgIcon(BULB_SVG), "Lights");
-  lights.type = "button";
+  lightsTile = buildTile("button", svgIcon(BULB_SVG, "ic-xl"), "Lights", LIGHTS_ON_COLOR);
+  lightsTile.type = "button";
   lightsSummaryEl = document.createElement("span");
   lightsSummaryEl.className = "tile-sub";
-  lights.append(lightsSummaryEl);
-  lights.addEventListener("click", () => go({ view: "lights" }));
+  lightsTile.append(lightsSummaryEl);
+  lightsTile.addEventListener("click", () => go({ view: "lights" }));
   const first = document.createElement("li");
-  first.append(lights);
+  first.append(lightsTile);
   ul.append(first);
   updateSummary();
 
   links.forEach((link, index) => {
-    const icon = document.createTextNode(iconFor(link));
+    const icon = textIcon(iconFor(link));
+    const accent = accentFor(link, index);
     let el;
     if (link.open === "tab") {
-      el = buildTile("a", icon, link.title);
+      el = buildTile("a", icon, link.title, accent);
       el.href = link.url;
     } else {
-      el = buildTile("button", icon, link.title);
+      el = buildTile("button", icon, link.title, accent);
       el.type = "button";
       el.addEventListener("click", () => go({ view: "app", index }));
     }
@@ -352,6 +404,8 @@ async function loadLinks() {
 
 $("home-ic").innerHTML = HOME_SVG;
 $("home-btn").addEventListener("click", goHome);
+$("all-power").append(svgIcon(POWER_SVG, "ic-lg"));
+$("all-power").addEventListener("click", toggleAll);
 window.addEventListener("popstate", applyRoute);
 
 document.addEventListener("visibilitychange", () => {
