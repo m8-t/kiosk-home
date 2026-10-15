@@ -73,7 +73,7 @@ Open http://localhost:8080/.
 
 ```
 python -m pytest -q -p no:cacheprovider tests
-node --test tests/js/
+node --test tests/js/*.test.mjs
 ```
 
 ## Deploy
