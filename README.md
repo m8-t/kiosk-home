@@ -1,112 +1,158 @@
 # kiosk-home
 
-A small start page for a wall tablet (Android, Chromium WebView, 10 inch landscape, touch
-only, portrait works too). It shows:
+A small start page for a wall tablet: big app tiles that open your self-hosted web apps,
+plus optional on/off and dimming for Philips Hue rooms.
 
-1. A home dashboard: a grid of large app tiles, one per entry of the links file plus a
-   built-in Lights tile that shows a live summary ("2 of 3 on" or "All off").
-2. A Lights view: an "All lights" switch on top, then one card per Philips Hue room with an
-   on/off toggle and a brightness slider (1 to 100 percent). Rooms only: no single lights, colors or scenes.
-3. An app view: a link opens inside the page in a full-size iframe below a thin top bar
-   with a Home button. Opened apps stay loaded (hidden) so returning to them is instant.
+![Dashboard](docs/screenshots/dashboard.png)
 
-Views use hash routes (`#/`, `#/lights`, `#/app/<index>`), so the Android back button
-walks back to the dashboard. `/api/rooms` is polled every 5 seconds only while the page is
-visible and the dashboard or Lights view is shown.
+> **Hobby project.** I built this for one Galaxy Tab A7 on my wall, my Hue Bridge and my
+> homelab. It does what I need and not much more. Feel free to use it, fork it or take
+> ideas from it, but expect no roadmap, no support and breaking changes whenever my setup
+> changes.
 
-The server is a single aiohttp process that serves the page and talks to the Hue bridge
-over the local CLIP v2 API. The app key never reaches the browser.
+## What it does
 
-## Configuration
+- **Dashboard**: one large tile per app from a `links.json` file, centred on the screen,
+  each with its own accent colour. A built-in Lights tile shows how many rooms are on.
+- **Apps open inside the page**: a tile opens the app full screen below a thin bar with a
+  Home button, so a kiosk browser without navigation never gets stuck. Opened apps stay
+  loaded in the background, so switching back is instant. The Android back button works
+  too.
+- **Lights**: an "All lights" switch, then one card per Hue room with an on/off toggle and
+  a brightness slider. Rooms only, no single bulbs, colours or scenes.
+- **Lights are optional**: with `KIOSK_LIGHTS=false` it is a plain app dashboard and never
+  talks to a Hue Bridge.
 
-| Variable | Default | Description |
+| Lights view | Portrait | Without lights |
 | --- | --- | --- |
-| `KIOSK_HUE_HOST` | required | IP address or host name of the Hue bridge |
-| `KIOSK_HUE_APP_KEY` | required | Hue application key (secret) |
-| `KIOSK_LINKS_FILE` | `/config/links.json` | Path of the links file |
-| `KIOSK_PORT` | `8080` | Listen port |
-| `KIOSK_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error` |
+| ![Lights](docs/screenshots/lights.png) | ![Portrait](docs/screenshots/dashboard-portrait.png) | ![No lights](docs/screenshots/dashboard-no-lights.png) |
 
-The server exits with a message if a required variable is missing. The app key is never
-logged. TLS verification is disabled for requests to the Hue bridge only, because the
-bridge uses a self-signed certificate.
+One small Python (aiohttp) process serves the page and talks to the Hue Bridge over its
+local API v2. The Hue app key stays on the server and never reaches the browser. The page
+is plain HTML, CSS and JavaScript with no build step.
 
-### Links file
+## Quick start
 
-A JSON array. `icon` is optional; without it the first letter of the title is used. URLs
-must be http or https. `open` is optional: `"frame"` (default) opens the app inside the
-page, `"tab"` navigates to the URL like a plain link. Any other value is an error. Sites
-that send `X-Frame-Options` or a restrictive `Content-Security-Policy: frame-ancestors`
-cannot be framed; use `"open": "tab"` for those. `color` is optional: a CSS hex color
-(`#rgb` or `#rrggbb`) used as the tile accent. Without it, tiles take a color from a fixed
-palette by position. The Lights tile is amber (grey when all lights are off). The file is read on every request, so a changed ConfigMap applies
-without a restart. A missing file means no tiles.
+```
+docker run -d -p 8080:8080 \
+  -e KIOSK_HUE_HOST=192.0.2.10 \
+  -e KIOSK_HUE_APP_KEY=your-hue-app-key \
+  -v ./links.json:/config/links.json:ro \
+  ghcr.io/m8-t/kiosk-home:0.4.0
+```
+
+Without Hue:
+
+```
+docker run -d -p 8080:8080 -e KIOSK_LIGHTS=false \
+  -v ./links.json:/config/links.json:ro \
+  ghcr.io/m8-t/kiosk-home:0.4.0
+```
+
+Open `http://<host>:8080/` and set it as the start page of your kiosk browser.
+
+## Adding tiles
+
+Tiles come from `links.json`, a JSON array. The file is read on every request, so edits
+(or a changed Kubernetes ConfigMap) show up on the next page load without a restart.
 
 ```json
 [
-  {"title": "Music", "url": "https://music.example.org", "icon": "M", "color": "#2dd4bf"},
-  {"title": "Router", "url": "http://192.0.2.1", "open": "tab"}
+  {"title": "Music", "url": "https://music.example.org/", "icon": "♪"},
+  {"title": "Audiobooks", "url": "https://books.example.org/", "icon": "A", "color": "#2dd4bf"},
+  {"title": "Router", "url": "http://192.0.2.1/", "icon": "R", "open": "tab"}
 ]
 ```
 
-## Create a Hue app key
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `title` | yes | Tile label |
+| `url` | yes | Must start with `http://` or `https://` |
+| `icon` | no | A character or emoji, drawn large in the tile colour. Default: the first letter of the title |
+| `color` | no | Accent colour as `#rgb` or `#rrggbb`. Default: violet, teal, pink, green, orange, by position |
+| `open` | no | `frame` (default) opens the app inside the page with the Home bar; `tab` navigates away like a normal link |
 
-Press the link button on the bridge, then within 30 seconds run:
+Tiles appear in file order. The Lights tile, when enabled, is always first and always
+amber (grey when every light is off).
+
+**When to use `"open": "tab"`**: some sites refuse to be shown inside another page (they
+send `X-Frame-Options` or a `Content-Security-Policy` with `frame-ancestors`). The tile
+then shows a blank or an error. kiosk-home cannot detect this, so set `tab` for those
+sites. Note that a `tab` app has no Home bar; you get back with the browser's back
+navigation.
+
+An invalid `links.json` (bad JSON, missing title, unknown `open` value, bad colour) shows
+an error message on the page instead of tiles.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `KIOSK_LIGHTS` | `true` | `false` turns off the whole Hue part: no Lights tile, no Hue settings needed. Accepts true/false/1/0/yes/no |
+| `KIOSK_HUE_HOST` | required with lights | IP or host name of the Hue Bridge (HTTPS by default, an `http://` or `https://` prefix is accepted) |
+| `KIOSK_HUE_APP_KEY` | required with lights | Hue application key, see below. Never logged |
+| `KIOSK_LINKS_FILE` | `/config/links.json` | Path of the links file. Missing file means no tiles |
+| `KIOSK_PORT` | `8080` | Listen port |
+| `KIOSK_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error` |
+
+The server refuses to start with a clear message when a required variable is missing or a
+value is invalid. Certificate checks are skipped for the Hue Bridge only, because it uses
+a self-signed certificate.
+
+### Create a Hue app key
+
+Press the round link button on the Hue Bridge, then within 30 seconds run:
 
 ```
-curl -sk -X POST https://<hue-ip>/api -d '{"devicetype":"kiosk-home#tablet","generatekey":true}'
+curl -sk -X POST https://<hue-ip>/api -d '{"devicetype":"kiosk-home#tablet"}'
 ```
 
-Use the `username` field of the response as `KIOSK_HUE_APP_KEY`.
+The `username` value in the answer is your `KIOSK_HUE_APP_KEY`. Lights are controlled per
+Hue room, and the "All lights" switch uses the bridge's built-in all-lights group, so one
+tap is one request to the bridge.
+
+## Kubernetes
+
+Example manifests are in [`deploy/kubernetes/`](deploy/kubernetes/):
+
+1. Create the `kiosk-home` secret from `secret.example.yaml` in the target namespace.
+   Without lights, skip it and remove the `secretRef` from `deployment.yaml`.
+2. Edit `configmap.yaml`: `KIOSK_HUE_HOST` (or `KIOSK_LIGHTS: "false"`) and your tiles in
+   the `kiosk-home-links` ConfigMap.
+3. `kubectl apply -k deploy/kubernetes/`
+4. Expose it with `httproute.example.yaml` (Gateway API) or `ingress.example.yaml`.
+
+There is no login. Keep it on your LAN or put it behind your own access control: anyone
+who can open the page can switch your lights.
 
 ## HTTP API
 
-- `GET /api/links`
-- `GET /api/rooms` returns `{"all": {id, on} | null, "rooms": [{id, name, on, brightness}]}`
-  with rooms sorted by name. `id` is the grouped light id. `all` is the bridge_home group
-  (on if any light is on) and is null if the bridge has none.
-- `POST /api/all` with `{"on": true}` or `{"on": false}` switches every light with one
-  request to the bridge. 404 if the bridge has no all-lights group, 400 for bad bodies.
-- `POST /api/rooms/{id}` with `{"on": true}` and/or `{"brightness": 42}`. Setting
-  brightness on a room that is off also turns it on. Unknown room 404, bad values 400,
-  Hue failures 502.
-- `GET /healthz` does not contact the bridge.
+The page uses these endpoints; they are handy for scripts too.
 
-## Run locally
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /healthz` | Liveness, does not contact the Hue Bridge |
+| `GET /api/config` | `{"lights": true}` or `false` |
+| `GET /api/links` | The tiles from `links.json` |
+| `GET /api/rooms` | `{"all": {"id", "on"} or null, "rooms": [{"id", "name", "on", "brightness"}]}` |
+| `POST /api/rooms/{id}` | `{"on": true}` and/or `{"brightness": 1-100}`; brightness also turns a room on |
+| `POST /api/all` | `{"on": true}` or `{"on": false}` for every light |
 
-Needs Python 3.11 or newer with aiohttp.
+With `KIOSK_LIGHTS=false` the three lights endpoints answer 404. Hue Bridge errors come
+back as 502 with a short message, which the page shows as a banner.
 
-```
-KIOSK_HUE_HOST=192.0.2.196 KIOSK_HUE_APP_KEY=... KIOSK_LINKS_FILE=./links.json \
-  python -m kiosk
-```
-
-Open http://localhost:8080/.
-
-## Tests
+## Development
 
 ```
+KIOSK_LIGHTS=false KIOSK_LINKS_FILE=./links.json python -m kiosk
 python -m pytest -q -p no:cacheprovider tests
 node --test tests/js/*.test.mjs
 ```
 
-## Deploy
-
-The image is `ghcr.io/m8-t/kiosk-home:<version>`, built by GitHub Actions when a `v*.*.*`
-tag is pushed. The tag is refused unless `CHANGELOG.md` has a section for that version,
-and that section becomes the release notes.
-
-Kubernetes manifests are in `deploy/kubernetes/`:
-
-1. Create the secret from `secret.example.yaml` (or the equivalent `k create secret`
-   command in it) in the target namespace.
-2. Edit `KIOSK_HUE_HOST` and the example links in `configmap.yaml`.
-3. `k apply -k deploy/kubernetes/`
-4. Expose it with `httproute.example.yaml` or `ingress.example.yaml`.
-
-There is no authentication in the app. Keep it on the LAN or put it behind your own
-access control.
+Needs Python 3.11 or newer with aiohttp, and Node 22 for the page tests. Releases are
+built by GitHub Actions when a `v*.*.*` tag is pushed; the tag needs a matching section in
+`CHANGELOG.md`, which becomes the release notes.
 
 ## License
 
-WTFPL, see `LICENSE`.
+[WTFPL](LICENSE). Do what you want with it.

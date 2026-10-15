@@ -18,6 +18,12 @@ Each release is published as a container image:
   shows no Lights tile or view and does not poll.
 - `GET /api/config` returns `{"lights": bool}` so the page knows whether to show lights.
 
+### Changed
+
+- README rewritten: screenshots, quick start with and without Hue, how to add tiles,
+  colours and icons, and a note that this is a hobby project.
+- Hue app key instructions no longer use `generatekey`, which some bridges reject.
+
 ## [0.3.0] - 2026-10-15
 
 ### Added
