@@ -8,6 +8,16 @@ All notable changes to this project are listed here. The format follows
 Each release is published as a container image:
 `ghcr.io/m8-t/kiosk-home:<version>`.
 
+## [0.4.0] - 2026-10-15
+
+### Added
+
+- `KIOSK_LIGHTS` (default `true`; accepts true/false/1/0/yes/no) makes the Hue lights part
+  optional. When `false`, the Hue host and app key are not required, the Hue bridge is
+  never contacted, `/api/rooms`, `/api/rooms/{id}` and `/api/all` return 404, and the page
+  shows no Lights tile or view and does not poll.
+- `GET /api/config` returns `{"lights": bool}` so the page knows whether to show lights.
+
 ## [0.3.0] - 2026-10-15
 
 ### Added
