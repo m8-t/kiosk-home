@@ -5,8 +5,8 @@ only, portrait works too). It shows:
 
 1. A home dashboard: a grid of large app tiles, one per entry of the links file plus a
    built-in Lights tile that shows a live summary ("2 of 3 on" or "All off").
-2. A Lights view: one card per Philips Hue room with an on/off toggle and a brightness
-   slider (1 to 100 percent). Rooms only: no single lights, colors or scenes.
+2. A Lights view: an "All lights" switch on top, then one card per Philips Hue room with an
+   on/off toggle and a brightness slider (1 to 100 percent). Rooms only: no single lights, colors or scenes.
 3. An app view: a link opens inside the page in a full-size iframe below a thin top bar
    with a Home button. Opened apps stay loaded (hidden) so returning to them is instant.
 
@@ -37,12 +37,14 @@ A JSON array. `icon` is optional; without it the first letter of the title is us
 must be http or https. `open` is optional: `"frame"` (default) opens the app inside the
 page, `"tab"` navigates to the URL like a plain link. Any other value is an error. Sites
 that send `X-Frame-Options` or a restrictive `Content-Security-Policy: frame-ancestors`
-cannot be framed; use `"open": "tab"` for those. The file is read on every request, so a changed ConfigMap applies
+cannot be framed; use `"open": "tab"` for those. `color` is optional: a CSS hex color
+(`#rgb` or `#rrggbb`) used as the tile accent. Without it, tiles take a color from a fixed
+palette by position. The Lights tile is amber (grey when all lights are off). The file is read on every request, so a changed ConfigMap applies
 without a restart. A missing file means no tiles.
 
 ```json
 [
-  {"title": "Music", "url": "https://music.example.org", "icon": "M"},
+  {"title": "Music", "url": "https://music.example.org", "icon": "M", "color": "#2dd4bf"},
   {"title": "Router", "url": "http://192.0.2.1", "open": "tab"}
 ]
 ```
@@ -60,8 +62,11 @@ Use the `username` field of the response as `KIOSK_HUE_APP_KEY`.
 ## HTTP API
 
 - `GET /api/links`
-- `GET /api/rooms` returns `[{id, name, on, brightness}]` sorted by name. `id` is the
-  grouped light id of the room.
+- `GET /api/rooms` returns `{"all": {id, on} | null, "rooms": [{id, name, on, brightness}]}`
+  with rooms sorted by name. `id` is the grouped light id. `all` is the bridge_home group
+  (on if any light is on) and is null if the bridge has none.
+- `POST /api/all` with `{"on": true}` or `{"on": false}` switches every light with one
+  request to the bridge. 404 if the bridge has no all-lights group, 400 for bad bodies.
 - `POST /api/rooms/{id}` with `{"on": true}` and/or `{"brightness": 42}`. Setting
   brightness on a room that is off also turns it on. Unknown room 404, bad values 400,
   Hue failures 502.

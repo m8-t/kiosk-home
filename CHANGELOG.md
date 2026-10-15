@@ -8,6 +8,24 @@ All notable changes to this project are listed here. The format follows
 Each release is published as a container image:
 `ghcr.io/m8-t/kiosk-home:<version>`.
 
+## [0.3.0] - 2026-10-15
+
+### Added
+
+- "All lights" switch at the top of the Lights view, backed by the bridge_home group and
+  the new `POST /api/all` endpoint. Room cards update at once when it is used.
+- Optional `color` field in `links.json` (hex `#rgb` or `#rrggbb`), validated by the
+  server.
+
+### Changed
+
+- The dashboard tiles are centered horizontally and vertically and are larger.
+- Every tile has its own accent color (own `color` or a palette by position) used for the
+  card tint, glow and icon. Text icons are drawn in the accent color at the size of the
+  built-in icon. The Lights icon is amber when any room is on and grey when all are off.
+- Page background is a subtle gradient instead of flat.
+- `GET /api/rooms` now returns an object `{"all": ..., "rooms": [...]}` instead of a list.
+
 ## [0.2.0] - 2026-10-15
 
 ### Added
