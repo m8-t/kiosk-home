@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   clampBrightness, displayBrightness, iconFor, mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
-  PALETTE, isHexColor, accentFor, lightsAccent, LIGHTS_ON_COLOR, LIGHTS_OFF_COLOR, mergeAll, setAllRooms,
+  PALETTE, isHexColor, accentFor, lightsAccent, LIGHTS_ON_COLOR, LIGHTS_OFF_COLOR, mergeAll, setAllRooms, tileList,
 } from "../../kiosk/web/logic.js";
 
 test("clampBrightness", () => {
@@ -168,4 +168,25 @@ test("setAllRooms sets on and keeps the rest", () => {
   assert.deepEqual(setAllRooms(rooms, false).map((r) => r.on), [false, false]);
   assert.deepEqual(setAllRooms(rooms, true)[0], { id: "a", on: true, brightness: 30 });
   assert.equal(rooms[0].on, true);
+});
+
+test("lights disabled: route falls back to home", () => {
+  assert.deepEqual(parseRoute("#/lights", 2, false), { view: "home" });
+  assert.deepEqual(parseRoute("#/lights", 2, true), { view: "lights" });
+  assert.deepEqual(parseRoute("#/app/1", 2, false), { view: "app", index: 1 });
+});
+
+test("lights disabled: never polls", () => {
+  assert.equal(shouldPoll("home", false, false), false);
+  assert.equal(shouldPoll("lights", false, false), false);
+  assert.equal(shouldPoll("home", false, true), true);
+});
+
+test("tileList with and without lights", () => {
+  const links = [{ title: "A" }, { title: "B" }];
+  assert.deepEqual(tileList(links, true).map((t) => t.kind), ["lights", "app", "app"]);
+  const off = tileList(links, false);
+  assert.deepEqual(off.map((t) => t.kind), ["app", "app"]);
+  assert.deepEqual(off.map((t) => t.index), [0, 1]);
+  assert.deepEqual(tileList([], false), []);
 });

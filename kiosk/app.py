@@ -111,7 +111,19 @@ async def handle_links(request: web.Request) -> web.Response:
         return _json_error(500, str(exc))
 
 
+def _lights_disabled(request: web.Request) -> web.Response | None:
+    if request.app[SETTINGS].lights:
+        return None
+    return _json_error(404, "lights disabled")
+
+
+async def handle_config(request: web.Request) -> web.Response:
+    return web.json_response({"lights": request.app[SETTINGS].lights})
+
+
 async def handle_rooms(request: web.Request) -> web.Response:
+    if (off := _lights_disabled(request)) is not None:
+        return off
     try:
         overview = await request.app[HUE].overview()
     except HueError as exc:
@@ -123,6 +135,8 @@ async def handle_rooms(request: web.Request) -> web.Response:
 
 
 async def handle_all_update(request: web.Request) -> web.Response:
+    if (off := _lights_disabled(request)) is not None:
+        return off
     try:
         payload = await request.json()
     except ValueError:
@@ -141,6 +155,8 @@ async def handle_all_update(request: web.Request) -> web.Response:
 
 
 async def handle_room_update(request: web.Request) -> web.Response:
+    if (off := _lights_disabled(request)) is not None:
+        return off
     try:
         payload = await request.json()
     except ValueError:
@@ -188,9 +204,13 @@ def create_app(settings: Settings) -> web.Application:
             app[HUE] = HueClient(settings.hue_base_url, settings.hue_app_key, session)
             yield
 
-    app.cleanup_ctx.append(hue_session)
+    if settings.lights:
+        app.cleanup_ctx.append(hue_session)
+    else:
+        log.info("lights are disabled (KIOSK_LIGHTS=false), Hue is not contacted")
     app.router.add_get("/", handle_index)
     app.router.add_get("/healthz", handle_healthz)
+    app.router.add_get("/api/config", handle_config)
     app.router.add_get("/api/links", handle_links)
     app.router.add_get("/api/rooms", handle_rooms)
     app.router.add_post("/api/all", handle_all_update)
@@ -208,6 +228,9 @@ def main(env: Mapping[str, str] | None = None) -> int:
     logging.basicConfig(
         level=settings.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    log.info("starting on port %d, hue bridge %s", settings.port, settings.hue_host)
+    if settings.lights:
+        log.info("starting on port %d, hue bridge %s", settings.port, settings.hue_host)
+    else:
+        log.info("starting on port %d", settings.port)
     web.run_app(create_app(settings), port=settings.port, print=None, access_log=None)
     return 0

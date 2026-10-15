@@ -5,6 +5,9 @@ metadata:
   labels:
     app.kubernetes.io/name: kiosk-home
 data:
+  # true shows the Lights tile and view and needs the Hue settings; false hides them
+  # and the Hue host and app key are not needed.
+  KIOSK_LIGHTS: "true"
   # IP address of the Hue bridge.
   KIOSK_HUE_HOST: "192.0.2.196"
   # debug, info, warning or error.

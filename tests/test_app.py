@@ -345,6 +345,64 @@ async def test_all_put_failure_502(tmp_path: Path) -> None:
         assert (await env.client.post("/api/all", json={"on": False})).status == 502
 
 
+def test_lights_default_true_and_parsing() -> None:
+    base = {"KIOSK_HUE_HOST": "h", "KIOSK_HUE_APP_KEY": "k"}
+    assert load_settings(base).lights is True
+    for raw in ["true", "TRUE", "1", "yes", "Yes", " true "]:
+        assert load_settings({**base, "KIOSK_LIGHTS": raw}).lights is True
+    for raw in ["false", "False", "0", "no", "NO"]:
+        assert load_settings({**base, "KIOSK_LIGHTS": raw}).lights is False
+
+
+def test_lights_invalid_value() -> None:
+    with pytest.raises(ConfigError, match="KIOSK_LIGHTS"):
+        load_settings({"KIOSK_HUE_HOST": "h", "KIOSK_HUE_APP_KEY": "k", "KIOSK_LIGHTS": "maybe"})
+
+
+def test_hue_vars_optional_when_lights_disabled() -> None:
+    s = load_settings({"KIOSK_LIGHTS": "false"})
+    assert s.lights is False and s.hue_host == "" and s.hue_app_key == ""
+    ignored = load_settings({"KIOSK_LIGHTS": "0", "KIOSK_HUE_HOST": "h", "KIOSK_HUE_APP_KEY": "k"})
+    assert ignored.lights is False and ignored.hue_host == ""
+
+
+def test_hue_vars_still_required_when_lights_enabled() -> None:
+    with pytest.raises(ConfigError, match="KIOSK_HUE_HOST"):
+        load_settings({"KIOSK_LIGHTS": "true"})
+    with pytest.raises(ConfigError, match="KIOSK_HUE_HOST"):
+        load_settings({})
+
+
+@asynccontextmanager
+async def lights_off_client(tmp_path: Path) -> AsyncIterator[TestClient]:
+    links = tmp_path / "links.json"
+    links.write_text(json.dumps([{"title": "Nav", "url": "https://music.example.org"}]))
+    async with TestClient(TestServer(create_app(Settings(lights=False, links_file=links)))) as c:
+        yield c
+
+
+async def test_lights_disabled_endpoints_404(tmp_path: Path) -> None:
+    async with lights_off_client(tmp_path) as client:
+        for resp in [
+            await client.get("/api/rooms"),
+            await client.post("/api/rooms/gl-k", json={"on": True}),
+            await client.post("/api/all", json={"on": True}),
+        ]:
+            assert resp.status == 404
+            assert await resp.json() == {"error": "lights disabled"}
+        assert (await client.get("/api/links")).status == 200
+        assert (await client.get("/healthz")).status == 200
+        assert (await client.get("/")).status == 200
+
+
+async def test_config_endpoint(tmp_path: Path) -> None:
+    async with lights_off_client(tmp_path) as client:
+        assert await (await client.get("/api/config")).json() == {"lights": False}
+    async with rig(tmp_path) as env:
+        assert await (await env.client.get("/api/config")).json() == {"lights": True}
+        assert isinstance(await (await env.client.get("/api/links")).json(), list)
+
+
 def test_settings_defaults() -> None:
     s = load_settings({"KIOSK_HUE_HOST": "1.2.3.4", "KIOSK_HUE_APP_KEY": "topsecretkey"})
     assert s.hue_base_url == "https://1.2.3.4"

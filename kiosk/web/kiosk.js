@@ -1,7 +1,7 @@
 import {
   POLL_MS, HOLD_MS, SLIDER_INTERVAL_MS, clampBrightness, displayBrightness, iconFor,
   mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
-  accentFor, lightsAccent, mergeAll, setAllRooms, LIGHTS_ON_COLOR,
+  accentFor, lightsAccent, mergeAll, setAllRooms, tileList, LIGHTS_ON_COLOR,
 } from "./logic.js";
 
 const POWER_SVG =
@@ -29,6 +29,7 @@ let statusTimer = null;
 let pollTimer = null;
 let polling = false;
 let links = [];
+let lightsEnabled = true;
 let route = { view: "home" };
 let roomsLoaded = false;
 let allState = null;
@@ -254,7 +255,7 @@ async function poll() {
 }
 
 function syncPolling() {
-  const want = shouldPoll(route.view, document.hidden);
+  const want = shouldPoll(route.view, document.hidden, lightsEnabled);
   if (want && pollTimer === null) {
     poll();
     pollTimer = setInterval(poll, POLL_MS);
@@ -300,34 +301,37 @@ function textIcon(text) {
 function renderTiles() {
   const ul = $("tiles");
   ul.replaceChildren();
+  lightsTile = null;
+  lightsSummaryEl = null;
 
-  lightsTile = buildTile("button", svgIcon(BULB_SVG, "ic-xl"), "Lights", LIGHTS_ON_COLOR);
-  lightsTile.type = "button";
-  lightsSummaryEl = document.createElement("span");
-  lightsSummaryEl.className = "tile-sub";
-  lightsTile.append(lightsSummaryEl);
-  lightsTile.addEventListener("click", () => go({ view: "lights" }));
-  const first = document.createElement("li");
-  first.append(lightsTile);
-  ul.append(first);
-  updateSummary();
-
-  links.forEach((link, index) => {
-    const icon = textIcon(iconFor(link));
-    const accent = accentFor(link, index);
-    let el;
-    if (link.open === "tab") {
-      el = buildTile("a", icon, link.title, accent);
-      el.href = link.url;
-    } else {
-      el = buildTile("button", icon, link.title, accent);
-      el.type = "button";
-      el.addEventListener("click", () => go({ view: "app", index }));
-    }
+  for (const tile of tileList(links, lightsEnabled)) {
     const li = document.createElement("li");
-    li.append(el);
+    if (tile.kind === "lights") {
+      lightsTile = buildTile("button", svgIcon(BULB_SVG, "ic-xl"), "Lights", LIGHTS_ON_COLOR);
+      lightsTile.type = "button";
+      lightsSummaryEl = document.createElement("span");
+      lightsSummaryEl.className = "tile-sub";
+      lightsTile.append(lightsSummaryEl);
+      lightsTile.addEventListener("click", () => go({ view: "lights" }));
+      li.append(lightsTile);
+    } else {
+      const { index, link } = tile;
+      const icon = textIcon(iconFor(link));
+      const accent = accentFor(link, index);
+      let el;
+      if (link.open === "tab") {
+        el = buildTile("a", icon, link.title, accent);
+        el.href = link.url;
+      } else {
+        el = buildTile("button", icon, link.title, accent);
+        el.type = "button";
+        el.addEventListener("click", () => go({ view: "app", index }));
+      }
+      li.append(el);
+    }
     ul.append(li);
-  });
+  }
+  updateSummary();
 }
 
 function frameFor(index) {
@@ -352,7 +356,7 @@ function frameFor(index) {
 }
 
 function applyRoute() {
-  let r = parseRoute(location.hash, links.length);
+  let r = parseRoute(location.hash, links.length, lightsEnabled);
   if (r.view === "app" && links[r.index].open === "tab") r = { view: "home" };
   route = r;
   const isApp = r.view === "app";
@@ -386,7 +390,9 @@ function goHome() {
 
 async function loadLinks() {
   try {
-    links = await api("/api/links");
+    const [config, list] = await Promise.all([api("/api/config"), api("/api/links")]);
+    lightsEnabled = config.lights !== false;
+    links = list;
   } catch (err) {
     showError(err.message);
     applyRoute();

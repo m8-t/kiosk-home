@@ -77,9 +77,9 @@ export function createThrottle(fn, intervalMs, deps = {}) {
 }
 
 // Hash route. Unknown hashes and out-of-range app indexes fall back to home.
-export function parseRoute(hash, linkCount = Infinity) {
+export function parseRoute(hash, linkCount = Infinity, lights = true) {
   const h = String(hash || "").replace(/^#/, "");
-  if (h === "/lights") return { view: "lights" };
+  if (h === "/lights") return lights ? { view: "lights" } : { view: "home" };
   const m = /^\/app\/(\d+)$/.exec(h);
   if (m) {
     const index = Number(m[1]);
@@ -103,8 +103,8 @@ export function lightsSummary(rooms) {
 }
 
 // Poll only while the page is visible and the dashboard or lights view is shown.
-export function shouldPoll(view, hidden) {
-  return !hidden && (view === "home" || view === "lights");
+export function shouldPoll(view, hidden, lights = true) {
+  return lights && !hidden && (view === "home" || view === "lights");
 }
 
 export const PALETTE = ["#a78bfa", "#2dd4bf", "#f472b6", "#4ade80", "#fb923c"];
@@ -135,4 +135,10 @@ export function mergeAll(local, polled, touchedAt, now, holdMs = HOLD_MS) {
 // Rooms with every room set on or off; brightness is left as is.
 export function setAllRooms(rooms, on) {
   return rooms.map((r) => ({ ...r, on }));
+}
+
+// Dashboard tiles in order: the built-in Lights tile (only when enabled), then every link.
+export function tileList(links, lights) {
+  const tiles = links.map((link, index) => ({ kind: "app", index, link }));
+  return lights ? [{ kind: "lights" }, ...tiles] : tiles;
 }
