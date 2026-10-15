@@ -9,16 +9,18 @@
 </head>
 <body>
 <div id="status" class="status" role="status" hidden></div>
-<main class="page">
-  <section id="links-section" aria-label="Links" hidden>
-    <ul id="links" class="tiles"></ul>
-  </section>
-  <section id="rooms-section" aria-label="Lights">
-    <h1>Lights</h1>
-    <p id="rooms-empty" class="sub" hidden>No rooms found</p>
-    <ul id="rooms" class="rooms"></ul>
-  </section>
+<header id="bar" class="bar" hidden>
+  <button id="home-btn" type="button" class="home-btn" aria-label="Home"><span class="ic" id="home-ic"></span><span>Home</span></button>
+  <h1 id="bar-title" class="bar-title"></h1>
+</header>
+<main id="view-home" class="page" aria-label="Apps">
+  <ul id="tiles" class="tiles"></ul>
 </main>
+<main id="view-lights" class="page" aria-label="Lights" hidden>
+  <p id="rooms-empty" class="sub" hidden>No rooms found</p>
+  <ul id="rooms" class="rooms"></ul>
+</main>
+<div id="frames" class="frames" hidden></div>
 <script type="module" src="/assets/kiosk.js"></script>
 </body>
 </html>

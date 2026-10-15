@@ -24,6 +24,9 @@ HUE = web.AppKey("hue", HueClient)
 KNOWN_IDS = web.AppKey("known_ids", set)
 
 
+OPEN_MODES = ("frame", "tab")
+
+
 class LinksError(Exception):
     pass
 
@@ -47,15 +50,20 @@ def read_links(path: Path) -> list[dict[str, str]]:
         if not isinstance(item, dict):
             raise LinksError(f"link {i} must be an object")
         title, url, icon = item.get("title"), item.get("url"), item.get("icon")
+        open_mode = item.get("open")
         if not isinstance(title, str) or not title.strip():
             raise LinksError(f"link {i} needs a title")
         if not isinstance(url, str) or urlsplit(url).scheme not in ("http", "https"):
             raise LinksError(f"link {i} needs an http or https url")
         if icon is not None and not isinstance(icon, str):
             raise LinksError(f"link {i} icon must be a string")
+        if open_mode is not None and open_mode not in OPEN_MODES:
+            raise LinksError(f'link {i} open must be "frame" or "tab"')
         entry = {"title": title.strip(), "url": url.strip()}
         if icon:
             entry["icon"] = icon
+        if open_mode is not None:
+            entry["open"] = open_mode
         links.append(entry)
     return links
 

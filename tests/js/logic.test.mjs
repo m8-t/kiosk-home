@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampBrightness, displayBrightness, iconFor, mergeRooms, createThrottle,
+  clampBrightness, displayBrightness, iconFor, mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
 } from "../../kiosk/web/logic.js";
 
 test("clampBrightness", () => {
@@ -95,4 +95,41 @@ test("flush sends the final value and cancels the pending call", () => {
   assert.deepEqual(calls, [1, 3]);
   clock.advance(1000);
   assert.deepEqual(calls, [1, 3]);
+});
+
+test("parseRoute", () => {
+  assert.deepEqual(parseRoute(""), { view: "home" });
+  assert.deepEqual(parseRoute("#/"), { view: "home" });
+  assert.deepEqual(parseRoute("#/lights"), { view: "lights" });
+  assert.deepEqual(parseRoute("#/app/0", 2), { view: "app", index: 0 });
+  assert.deepEqual(parseRoute("#/app/1", 2), { view: "app", index: 1 });
+  assert.deepEqual(parseRoute("#/app/2", 2), { view: "home" });
+  assert.deepEqual(parseRoute("#/app/3"), { view: "app", index: 3 });
+  assert.deepEqual(parseRoute("#/app/x", 2), { view: "home" });
+  assert.deepEqual(parseRoute("#/app/-1", 2), { view: "home" });
+  assert.deepEqual(parseRoute("#/app/1/x", 2), { view: "home" });
+  assert.deepEqual(parseRoute("#/nope"), { view: "home" });
+  assert.deepEqual(parseRoute(undefined), { view: "home" });
+});
+
+test("routeHash round-trips", () => {
+  for (const r of [{ view: "home" }, { view: "lights" }, { view: "app", index: 4 }]) {
+    assert.deepEqual(parseRoute(routeHash(r)), r);
+  }
+});
+
+test("lightsSummary", () => {
+  assert.equal(lightsSummary(null), "");
+  assert.equal(lightsSummary([]), "No rooms");
+  assert.equal(lightsSummary([{ on: false }, { on: false }]), "All off");
+  assert.equal(lightsSummary([{ on: true }, { on: false }, { on: true }]), "2 of 3 on");
+  assert.equal(lightsSummary([{ on: true }]), "1 of 1 on");
+});
+
+test("shouldPoll", () => {
+  assert.equal(shouldPoll("home", false), true);
+  assert.equal(shouldPoll("lights", false), true);
+  assert.equal(shouldPoll("app", false), false);
+  assert.equal(shouldPoll("home", true), false);
+  assert.equal(shouldPoll("lights", true), false);
 });

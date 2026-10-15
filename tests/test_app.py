@@ -246,6 +246,9 @@ async def test_links_missing_file_is_empty(tmp_path: Path) -> None:
         '[{"title": "x", "url": "javascript:alert(1)"}]',
         '[{"url": "https://a.example"}]',
         '["x"]',
+        '[{"title": "x", "url": "https://a.example", "open": "window"}]',
+        '[{"title": "x", "url": "https://a.example", "open": true}]',
+        '[{"title": "x", "url": "https://a.example", "open": ""}]',
     ],
 )
 async def test_links_invalid_500(tmp_path: Path, content: str) -> None:
@@ -254,6 +257,21 @@ async def test_links_invalid_500(tmp_path: Path, content: str) -> None:
         resp = await env.client.get("/api/links")
         assert resp.status == 500
         assert "error" in await resp.json()
+
+
+async def test_links_open_mode_passes_through(tmp_path: Path) -> None:
+    async with rig(tmp_path) as env:
+        env.links.write_text(
+            json.dumps(
+                [
+                    {"title": "A", "url": "https://a.example", "open": "frame"},
+                    {"title": "B", "url": "https://b.example", "open": "tab"},
+                    {"title": "C", "url": "https://c.example"},
+                ]
+            )
+        )
+        data = await (await env.client.get("/api/links")).json()
+        assert [d.get("open") for d in data] == ["frame", "tab", None]
 
 
 def test_settings_defaults() -> None:

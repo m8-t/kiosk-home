@@ -75,3 +75,34 @@ export function createThrottle(fn, intervalMs, deps = {}) {
 
   return { call, flush };
 }
+
+// Hash route. Unknown hashes and out-of-range app indexes fall back to home.
+export function parseRoute(hash, linkCount = Infinity) {
+  const h = String(hash || "").replace(/^#/, "");
+  if (h === "/lights") return { view: "lights" };
+  const m = /^\/app\/(\d+)$/.exec(h);
+  if (m) {
+    const index = Number(m[1]);
+    if (Number.isSafeInteger(index) && index < linkCount) return { view: "app", index };
+  }
+  return { view: "home" };
+}
+
+export function routeHash(route) {
+  if (route.view === "lights") return "#/lights";
+  if (route.view === "app") return `#/app/${route.index}`;
+  return "#/";
+}
+
+// Text for the Lights tile. null means rooms are not loaded yet.
+export function lightsSummary(rooms) {
+  if (!rooms) return "";
+  if (rooms.length === 0) return "No rooms";
+  const on = rooms.filter((r) => r.on).length;
+  return on === 0 ? "All off" : `${on} of ${rooms.length} on`;
+}
+
+// Poll only while the page is visible and the dashboard or lights view is shown.
+export function shouldPoll(view, hidden) {
+  return !hidden && (view === "home" || view === "lights");
+}

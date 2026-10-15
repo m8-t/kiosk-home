@@ -1,12 +1,21 @@
 import {
   POLL_MS, HOLD_MS, SLIDER_INTERVAL_MS, clampBrightness, displayBrightness, iconFor,
-  mergeRooms, createThrottle,
+  mergeRooms, createThrottle, parseRoute, routeHash, lightsSummary, shouldPoll,
 } from "./logic.js";
 
 const POWER_SVG =
   '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v9"/>' +
   '<path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>';
+
+const HOME_SVG =
+  '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/>' +
+  '<path d="M5 10v10h5v-6h4v6h5V10"/></svg>';
+const BULB_SVG =
+  '<svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/>' +
+  '<path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg>';
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
@@ -18,6 +27,11 @@ const cards = new Map();
 let statusTimer = null;
 let pollTimer = null;
 let polling = false;
+let links = [];
+let route = { view: "home" };
+let roomsLoaded = false;
+let lightsSummaryEl = null;
+const frames = new Map();
 
 function showError(message) {
   statusEl.textContent = message;
@@ -186,7 +200,9 @@ async function poll() {
   try {
     const polled = await api("/api/rooms");
     rooms = mergeRooms(rooms, polled, lastChange, Date.now(), HOLD_MS);
+    roomsLoaded = true;
     render();
+    updateSummary();
     clearError();
   } catch (err) {
     showError(err.message);
@@ -195,50 +211,156 @@ async function poll() {
   }
 }
 
-function startPolling() {
-  stopPolling();
-  poll();
-  pollTimer = setInterval(poll, POLL_MS);
-}
-
-function stopPolling() {
-  clearInterval(pollTimer);
-  pollTimer = null;
-}
-
-function renderLinks(links) {
-  const ul = $("links");
-  ul.replaceChildren();
-  for (const link of links) {
-    const li = document.createElement("li");
-    const a = document.createElement("a");
-    a.className = "tile";
-    a.href = link.url;
-    const icon = document.createElement("span");
-    icon.className = "tile-icon";
-    icon.textContent = iconFor(link);
-    const title = document.createElement("span");
-    title.className = "tile-title";
-    title.textContent = link.title;
-    a.append(icon, title);
-    li.append(a);
-    ul.append(li);
+function syncPolling() {
+  const want = shouldPoll(route.view, document.hidden);
+  if (want && pollTimer === null) {
+    poll();
+    pollTimer = setInterval(poll, POLL_MS);
+  } else if (!want && pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
-  $("links-section").hidden = links.length === 0;
+}
+
+function svgIcon(svg, extra = "") {
+  const ic = document.createElement("span");
+  ic.className = `ic ${extra}`.trim();
+  ic.innerHTML = svg;
+  return ic;
+}
+
+function updateSummary() {
+  if (lightsSummaryEl) lightsSummaryEl.textContent = lightsSummary(roomsLoaded ? rooms : null);
+}
+
+function buildTile(tag, iconNode, titleText) {
+  const el = document.createElement(tag);
+  el.className = "tile";
+  const icon = document.createElement("span");
+  icon.className = "tile-icon";
+  icon.append(iconNode);
+  const title = document.createElement("span");
+  title.className = "tile-title";
+  title.textContent = titleText;
+  el.append(icon, title);
+  return el;
+}
+
+function renderTiles() {
+  const ul = $("tiles");
+  ul.replaceChildren();
+
+  const lights = buildTile("button", svgIcon(BULB_SVG), "Lights");
+  lights.type = "button";
+  lightsSummaryEl = document.createElement("span");
+  lightsSummaryEl.className = "tile-sub";
+  lights.append(lightsSummaryEl);
+  lights.addEventListener("click", () => go({ view: "lights" }));
+  const first = document.createElement("li");
+  first.append(lights);
+  ul.append(first);
+  updateSummary();
+
+  links.forEach((link, index) => {
+    const icon = document.createTextNode(iconFor(link));
+    let el;
+    if (link.open === "tab") {
+      el = buildTile("a", icon, link.title);
+      el.href = link.url;
+    } else {
+      el = buildTile("button", icon, link.title);
+      el.type = "button";
+      el.addEventListener("click", () => go({ view: "app", index }));
+    }
+    const li = document.createElement("li");
+    li.append(el);
+    ul.append(li);
+  });
+}
+
+function frameFor(index) {
+  const link = links[index];
+  let entry = frames.get(index);
+  if (entry && entry.url !== link.url) {
+    entry.el.remove();
+    frames.delete(index);
+    entry = null;
+  }
+  if (!entry) {
+    const el = document.createElement("iframe");
+    el.setAttribute("allow", "autoplay; fullscreen");
+    el.title = link.title;
+    el.src = link.url;
+    el.hidden = true;
+    $("frames").append(el);
+    entry = { el, url: link.url };
+    frames.set(index, entry);
+  }
+  return entry.el;
+}
+
+function applyRoute() {
+  let r = parseRoute(location.hash, links.length);
+  if (r.view === "app" && links[r.index].open === "tab") r = { view: "home" };
+  route = r;
+  const isApp = r.view === "app";
+  $("view-home").hidden = r.view !== "home";
+  $("view-lights").hidden = r.view !== "lights";
+  $("frames").hidden = !isApp;
+  $("bar").hidden = r.view === "home";
+  for (const entry of frames.values()) entry.el.hidden = true;
+  if (isApp) {
+    $("bar-title").textContent = links[r.index].title;
+    frameFor(r.index).hidden = false;
+  } else if (r.view === "lights") {
+    $("bar-title").textContent = "Lights";
+  }
+  syncPolling();
+}
+
+function go(target) {
+  history.pushState({ nav: true }, "", routeHash(target));
+  applyRoute();
+}
+
+function goHome() {
+  if (history.state && history.state.nav) {
+    history.back();
+  } else {
+    history.replaceState(null, "", routeHash({ view: "home" }));
+    applyRoute();
+  }
 }
 
 async function loadLinks() {
   try {
-    renderLinks(await api("/api/links"));
+    links = await api("/api/links");
   } catch (err) {
     showError(err.message);
+    applyRoute();
+    return;
   }
+  for (const [index, entry] of frames) {
+    if (!links[index] || links[index].url !== entry.url) {
+      entry.el.remove();
+      frames.delete(index);
+    }
+  }
+  renderTiles();
+  applyRoute();
 }
 
+$("home-ic").innerHTML = HOME_SVG;
+$("home-btn").addEventListener("click", goHome);
+window.addEventListener("popstate", applyRoute);
+
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) stopPolling();
-  else { loadLinks(); startPolling(); }
+  if (document.hidden) syncPolling();
+  else if (route.view === "app") syncPolling();
+  else {
+    loadLinks();
+    syncPolling();
+  }
 });
 
 loadLinks();
-if (!document.hidden) startPolling();
