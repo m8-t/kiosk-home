@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0e11">
+<title>Home</title>
+<link rel="stylesheet" href="/assets/kiosk.css">
+</head>
+<body>
+<div id="status" class="status" role="status" hidden></div>
+<main class="page">
+  <section id="links-section" aria-label="Links" hidden>
+    <ul id="links" class="tiles"></ul>
+  </section>
+  <section id="rooms-section" aria-label="Lights">
+    <h1>Lights</h1>
+    <p id="rooms-empty" class="sub" hidden>No rooms found</p>
+    <ul id="rooms" class="rooms"></ul>
+  </section>
+</main>
+<script type="module" src="/assets/kiosk.js"></script>
+</body>
+</html>
