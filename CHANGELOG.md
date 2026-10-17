@@ -8,6 +8,26 @@ All notable changes to this project are listed here. The format follows
 Each release is published as a container image:
 `ghcr.io/m8-t/kiosk-home:<version>`.
 
+## [0.5.0] - 2026-10-17
+
+### Added
+
+- `KIOSK_HUE_BRIDGE_ID` turns on the Hue Bridge certificate check: the certificate must be
+  signed by Signify's Hue CA (bundled as `kiosk/hue_ca.pem`) and issued to that bridge id,
+  so nobody on the network can pose as the bridge and catch the app key. Without it the
+  certificate is not checked, as before, and a warning is logged at start.
+
+### Changed
+
+- `POST /api/rooms/{id}` and `POST /api/all` answer 415 unless the body is sent as
+  `application/json`, and 403 when the browser marks the request as cross-site
+  (`Sec-Fetch-Site`, or an `Origin` from another host). Before, a web page opened anywhere
+  on the network could switch the lights with a plain-text POST.
+- Open dashboards share Hue reads: the room overview is cached for 1.5 seconds and
+  refreshed right after every switch or dim.
+- An unknown room id re-reads the rooms from the bridge at most once every 10 seconds, and
+  a failed re-read no longer forgets the known rooms.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added

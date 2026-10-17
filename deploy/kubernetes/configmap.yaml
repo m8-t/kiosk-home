@@ -10,6 +10,9 @@ data:
   KIOSK_LIGHTS: "true"
   # IP address of the Hue bridge.
   KIOSK_HUE_HOST: "192.0.2.196"
+  # The bridge id ("bridgeid" in https://<hue-ip>/api/config); turns on the
+  # certificate check for the Hue bridge.
+  KIOSK_HUE_BRIDGE_ID: "001788fffe000000"
   # debug, info, warning or error.
   KIOSK_LOG_LEVEL: "info"
 ---

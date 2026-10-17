@@ -37,8 +37,9 @@ is plain HTML, CSS and JavaScript with no build step.
 docker run -d -p 8080:8080 \
   -e KIOSK_HUE_HOST=192.0.2.10 \
   -e KIOSK_HUE_APP_KEY=your-hue-app-key \
+  -e KIOSK_HUE_BRIDGE_ID=001788fffe000000 \
   -v ./links.json:/config/links.json:ro \
-  ghcr.io/m8-t/kiosk-home:0.4.0
+  ghcr.io/m8-t/kiosk-home:0.5.0
 ```
 
 Without Hue:
@@ -46,7 +47,7 @@ Without Hue:
 ```
 docker run -d -p 8080:8080 -e KIOSK_LIGHTS=false \
   -v ./links.json:/config/links.json:ro \
-  ghcr.io/m8-t/kiosk-home:0.4.0
+  ghcr.io/m8-t/kiosk-home:0.5.0
 ```
 
 Open `http://<host>:8080/` and set it as the start page of your kiosk browser.
@@ -91,13 +92,27 @@ an error message on the page instead of tiles.
 | `KIOSK_LIGHTS` | `true` | `false` turns off the whole Hue part: no Lights tile, no Hue settings needed. Accepts true/false/1/0/yes/no |
 | `KIOSK_HUE_HOST` | required with lights | IP or host name of the Hue Bridge (HTTPS by default, an `http://` or `https://` prefix is accepted) |
 | `KIOSK_HUE_APP_KEY` | required with lights | Hue application key, see below. Never logged |
+| `KIOSK_HUE_BRIDGE_ID` | none | The bridge id (16 hex characters, see below). When set, the Hue Bridge certificate is checked |
 | `KIOSK_LINKS_FILE` | `/config/links.json` | Path of the links file. Missing file means no tiles |
 | `KIOSK_PORT` | `8080` | Listen port |
 | `KIOSK_LOG_LEVEL` | `info` | `debug`, `info`, `warning` or `error` |
 
 The server refuses to start with a clear message when a required variable is missing or a
-value is invalid. Certificate checks are skipped for the Hue Bridge only, because it uses
-a self-signed certificate.
+value is invalid.
+
+The Hue Bridge presents a certificate signed by Signify's own CA, issued to the bridge id.
+With `KIOSK_HUE_BRIDGE_ID` set, kiosk-home checks it against the bundled Hue CA
+certificates (`kiosk/hue_ca.pem`), so nobody on the network can pose as the bridge and
+catch the app key. Without it the certificate is not checked and a warning is logged at
+start. A failed check shows "Hue bridge certificate check failed" on the page.
+
+### Find the bridge id
+
+```
+curl -sk https://<hue-ip>/api/config
+```
+
+The `bridgeid` value in the answer is your `KIOSK_HUE_BRIDGE_ID` (upper or lower case).
 
 ### Create a Hue app key
 
@@ -140,6 +155,11 @@ The page uses these endpoints; they are handy for scripts too.
 
 With `KIOSK_LIGHTS=false` the three lights endpoints answer 404. Hue Bridge errors come
 back as 502 with a short message, which the page shows as a banner.
+
+The two `POST` endpoints need `Content-Type: application/json` (415 otherwise) and refuse
+requests that a browser marks as coming from another site (403), so a web page opened
+elsewhere on your network cannot switch your lights. Scripts without `Origin` or
+`Sec-Fetch-Site` headers work as before.
 
 ## Development
 
