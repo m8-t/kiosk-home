@@ -2,26 +2,56 @@
 
 import asyncio
 import logging
+import ssl
+from pathlib import Path
+from time import monotonic
 from typing import Any
 
 import aiohttp
 
+from kiosk.config import DEFAULT_HUE_CA_FILE, ConfigError
+
 log = logging.getLogger("kiosk.hue")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=8)
+_CERT_FAILED = "Hue bridge certificate check failed, check KIOSK_HUE_BRIDGE_ID"
+OVERVIEW_TTL_S = 1.5
 
 
 class HueError(Exception):
     """The bridge could not be reached or rejected a request."""
 
 
+def _load_context(ca_file: Path) -> ssl.SSLContext:
+    try:
+        return ssl.create_default_context(cafile=str(ca_file))
+    except OSError as exc:
+        raise ConfigError(f"cannot load Hue CA file {ca_file}: {exc}") from exc
+
+
 class HueClient:
-    def __init__(self, base_url: str, app_key: str, session: aiohttp.ClientSession) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        app_key: str,
+        session: aiohttp.ClientSession,
+        bridge_id: str = "",
+        ca_file: Path = DEFAULT_HUE_CA_FILE,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._headers = {"hue-application-key": app_key}
         self._session = session
+        # False leaves the certificate unchecked, the bridge id is what enables verification.
+        self._ssl: ssl.SSLContext | bool = False
+        self._server_hostname: str | None = None
+        if bridge_id and self._base.startswith("https://"):
+            self._ssl = _load_context(ca_file)
+            self._server_hostname = bridge_id.lower()
         self._all_id: str | None = None
         self._all_known = False
+        self._cached: tuple[float, dict[str, Any]] | None = None
+        self._inflight: asyncio.Task[dict[str, Any]] | None = None
+        self._generation = 0
 
     async def all_group_id(self) -> str | None:
         """Grouped light id of the bridge_home resource (all lights), cached once found."""
@@ -44,9 +74,14 @@ class HueClient:
     async def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> list[Any]:
         url = f"{self._base}/clip/v2/resource/{path}"
         try:
-            # The bridge presents a self-signed certificate; verification is off for it only.
             async with self._session.request(
-                method, url, json=body, headers=self._headers, ssl=False, timeout=_TIMEOUT
+                method,
+                url,
+                json=body,
+                headers=self._headers,
+                ssl=self._ssl,
+                server_hostname=self._server_hostname,
+                timeout=_TIMEOUT,
             ) as resp:
                 try:
                     payload = await resp.json(content_type=None)
@@ -55,6 +90,8 @@ class HueClient:
                 status = resp.status
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
             log.warning("hue %s %s failed: %s", method, path, type(exc).__name__)
+            if self._server_hostname is not None and isinstance(exc, aiohttp.ClientSSLError):
+                raise HueError(_CERT_FAILED) from exc
             raise HueError("Hue bridge unreachable") from exc
         errors = payload.get("errors") if isinstance(payload, dict) else None
         if status == 429:
@@ -78,11 +115,40 @@ class HueClient:
             return None
 
     async def rooms(self) -> list[dict[str, Any]]:
-        """Return rooms as {id (grouped_light id), name, on, brightness}, sorted by name."""
-        return (await self.overview())["rooms"]
+        """Return rooms as {id (grouped_light id), name, on, brightness}, sorted by name.
+
+        Always read from the bridge, never from the overview cache.
+        """
+        return (await self._read_overview())["rooms"]
 
     async def overview(self) -> dict[str, Any]:
-        """Return {"all": {id, on} | None, "rooms": [...]} from one set of bridge reads."""
+        """Return {"all": {id, on} | None, "rooms": [...]}, cached for OVERVIEW_TTL_S.
+
+        Concurrent callers share one bridge read. The result is shared, do not modify it.
+        """
+        if self._cached is not None and monotonic() - self._cached[0] < OVERVIEW_TTL_S:
+            return self._cached[1]
+        if self._inflight is None:
+            self._inflight = asyncio.create_task(self._refresh_overview())
+        return await asyncio.shield(self._inflight)
+
+    async def _refresh_overview(self) -> dict[str, Any]:
+        generation, started = self._generation, monotonic()
+        try:
+            overview = await self._read_overview()
+        finally:
+            if self._inflight is asyncio.current_task():
+                self._inflight = None
+        if generation == self._generation:
+            self._cached = (started, overview)
+        return overview
+
+    def _invalidate_overview(self) -> None:
+        self._generation += 1
+        self._cached = None
+        self._inflight = None
+
+    async def _read_overview(self) -> dict[str, Any]:
         rooms, lights, all_id = await asyncio.gather(
             self._request("GET", "room"), self._request("GET", "grouped_light"), self._safe_all_id()
         )
@@ -122,3 +188,4 @@ class HueClient:
 
     async def set_group(self, group_id: str, body: dict[str, Any]) -> None:
         await self._request("PUT", f"grouped_light/{group_id}", body)
+        self._invalidate_overview()

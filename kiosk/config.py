@@ -1,9 +1,12 @@
 """Settings read from KIOSK_* environment variables."""
 
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+
+DEFAULT_HUE_CA_FILE = Path(__file__).resolve().parent / "hue_ca.pem"
 
 
 class ConfigError(Exception):
@@ -14,6 +17,8 @@ class ConfigError(Exception):
 class Settings:
     hue_host: str = ""
     hue_app_key: str = field(default="", repr=False)
+    hue_bridge_id: str = ""
+    hue_ca_file: Path = DEFAULT_HUE_CA_FILE
     lights: bool = True
     links_file: Path = Path("/config/links.json")
     port: int = 8080
@@ -29,6 +34,7 @@ class Settings:
 
 _TRUE = {"true", "1", "yes"}
 _FALSE = {"false", "0", "no"}
+_BRIDGE_ID = re.compile(r"[0-9a-f]{16}")
 
 
 def _parse_bool(name: str, raw: str, default: bool) -> bool:
@@ -40,6 +46,13 @@ def _parse_bool(name: str, raw: str, default: bool) -> bool:
     if value in _FALSE:
         return False
     raise ConfigError(f"{name} must be true/false/1/0/yes/no, got {raw!r}")
+
+
+def _parse_bridge_id(raw: str) -> str:
+    value = raw.strip().lower()
+    if value and not _BRIDGE_ID.fullmatch(value):
+        raise ConfigError(f"KIOSK_HUE_BRIDGE_ID must be 16 hex characters, got {raw!r}")
+    return value
 
 
 def load_settings(env: Mapping[str, str]) -> Settings:
@@ -65,6 +78,7 @@ def load_settings(env: Mapping[str, str]) -> Settings:
     return Settings(
         hue_host=env.get("KIOSK_HUE_HOST", "").strip() if lights else "",
         hue_app_key=env.get("KIOSK_HUE_APP_KEY", "").strip() if lights else "",
+        hue_bridge_id=_parse_bridge_id(env.get("KIOSK_HUE_BRIDGE_ID", "")) if lights else "",
         lights=lights,
         links_file=Path(env.get("KIOSK_LINKS_FILE", "").strip() or "/config/links.json"),
         port=port,

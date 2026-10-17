@@ -2,11 +2,14 @@
 
 import json
 import logging
+import math
 import os
 import re
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -19,10 +22,20 @@ from kiosk.hue import HueClient, HueError
 log = logging.getLogger("kiosk")
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+UNKNOWN_REFRESH_S = 10
+
+
+@dataclass
+class RoomIds:
+    """Room ids last seen on the bridge, and when an unknown id last triggered a re-read."""
+
+    known: set[str] = field(default_factory=set)
+    refreshed_at: float = -math.inf
+
 
 SETTINGS = web.AppKey("settings", Settings)
 HUE = web.AppKey("hue", HueClient)
-KNOWN_IDS = web.AppKey("known_ids", set)
+ROOM_IDS = web.AppKey("room_ids", RoomIds)
 
 
 OPEN_MODES = ("frame", "tab")
@@ -117,6 +130,29 @@ def _lights_disabled(request: web.Request) -> web.Response | None:
     return _json_error(404, "lights disabled")
 
 
+def _is_cross_site(request: web.Request) -> bool:
+    site = request.headers.get("Sec-Fetch-Site")
+    if site is not None and site != "same-origin":
+        return True
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return False
+    try:
+        host = urlsplit(origin).netloc.lower()
+    except ValueError:
+        return True
+    return not host or host != request.host.lower()
+
+
+def _reject_unsafe_post(request: web.Request) -> web.Response | None:
+    """A cross-site page can send text/plain POSTs without preflight, so insist on JSON."""
+    if request.content_type != "application/json":
+        return _json_error(415, "content type must be application/json")
+    if _is_cross_site(request):
+        return _json_error(403, "cross-site request")
+    return None
+
+
 async def handle_config(request: web.Request) -> web.Response:
     return web.json_response({"lights": request.app[SETTINGS].lights})
 
@@ -128,15 +164,28 @@ async def handle_rooms(request: web.Request) -> web.Response:
         overview = await request.app[HUE].overview()
     except HueError as exc:
         return _json_error(502, str(exc))
-    known = request.app[KNOWN_IDS]
-    known.clear()
-    known.update(r["id"] for r in overview["rooms"])
+    request.app[ROOM_IDS].known = {r["id"] for r in overview["rooms"]}
     return web.json_response(overview)
+
+
+async def _room_exists(request: web.Request, room_id: str) -> bool:
+    """An unknown id re-reads the rooms from the bridge, at most once per UNKNOWN_REFRESH_S."""
+    ids = request.app[ROOM_IDS]
+    if room_id in ids.known:
+        return True
+    now = monotonic()
+    if now - ids.refreshed_at < UNKNOWN_REFRESH_S:
+        return False
+    ids.refreshed_at = now
+    ids.known = {r["id"] for r in await request.app[HUE].rooms()}
+    return room_id in ids.known
 
 
 async def handle_all_update(request: web.Request) -> web.Response:
     if (off := _lights_disabled(request)) is not None:
         return off
+    if (rejected := _reject_unsafe_post(request)) is not None:
+        return rejected
     try:
         payload = await request.json()
     except ValueError:
@@ -157,6 +206,8 @@ async def handle_all_update(request: web.Request) -> web.Response:
 async def handle_room_update(request: web.Request) -> web.Response:
     if (off := _lights_disabled(request)) is not None:
         return off
+    if (rejected := _reject_unsafe_post(request)) is not None:
+        return rejected
     try:
         payload = await request.json()
     except ValueError:
@@ -166,14 +217,10 @@ async def handle_room_update(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _json_error(400, str(exc))
     hue = request.app[HUE]
-    known = request.app[KNOWN_IDS]
     room_id = request.match_info["id"]
     try:
-        if room_id not in known:
-            known.clear()
-            known.update(r["id"] for r in await hue.rooms())
-            if room_id not in known:
-                return _json_error(404, "unknown room")
+        if not await _room_exists(request, room_id):
+            return _json_error(404, "unknown room")
         body: dict[str, Any] = {}
         if on is not None:
             body["on"] = {"on": on}
@@ -197,14 +244,22 @@ async def handle_index(request: web.Request) -> web.FileResponse:
 def create_app(settings: Settings) -> web.Application:
     app = web.Application()
     app[SETTINGS] = settings
-    app[KNOWN_IDS] = set()
+    app[ROOM_IDS] = RoomIds()
 
     async def hue_session(app: web.Application) -> Any:
         async with aiohttp.ClientSession() as session:
-            app[HUE] = HueClient(settings.hue_base_url, settings.hue_app_key, session)
+            app[HUE] = HueClient(
+                settings.hue_base_url,
+                settings.hue_app_key,
+                session,
+                settings.hue_bridge_id,
+                settings.hue_ca_file,
+            )
             yield
 
     if settings.lights:
+        if not settings.hue_bridge_id:
+            log.warning("Hue certificate is not verified, set KIOSK_HUE_BRIDGE_ID to check it")
         app.cleanup_ctx.append(hue_session)
     else:
         log.info("lights are disabled (KIOSK_LIGHTS=false), Hue is not contacted")
